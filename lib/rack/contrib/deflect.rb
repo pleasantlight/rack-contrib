@@ -124,9 +124,14 @@ module Rack
       @remote_addr_map.delete @remote_addr
     end
 
+    def rails_logger(message)
+      RAILS_DEFAULT_LOGGER.info "Rack::Deflect = #{message}"
+    end
+    
     def increment_requests
       map[:requests] += 1
-      map[:request_uris] << @env["REQUEST_URI"]
+      rails_logger "Current Request: #{@env["REQUEST_URI"]}"
+      map[:request_uris] = map[:request_uris]  << @env["REQUEST_URI"]
     end
 
     def exceeded_request_threshold?
