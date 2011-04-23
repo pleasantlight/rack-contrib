@@ -102,6 +102,7 @@ module Rack
     def block!
       return if blocked?
       log "blocked #{@remote_addr}"
+      Notifier.deliver_ip_blocked(ip_address, Socket.gethostname, map[:request_uris])
       map[:block_expires] = Time.now + options[:block_duration]
     end
 
