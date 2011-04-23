@@ -125,7 +125,7 @@ module Rack
 
     def increment_requests
       map[:requests] += 1
-      map[:request_uris] << env["REQUEST_URI"]
+      map[:request_uris] << @env["REQUEST_URI"]
     end
 
     def exceeded_request_threshold?
