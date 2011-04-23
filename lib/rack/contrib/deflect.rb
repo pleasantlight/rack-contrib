@@ -67,6 +67,7 @@ module Rack
     end
 
     def deflect? env
+      @env = env
       @remote_addr = env['REMOTE_ADDR']
       return false if options[:whitelist].include? @remote_addr
       return true  if options[:blacklist].include? @remote_addr
@@ -85,7 +86,8 @@ module Rack
     def map
       @remote_addr_map[@remote_addr] ||= {
         :expires => Time.now + options[:interval],
-        :requests => 0
+        :requests => 0,
+        :request_uris => []
       }
     end
 
@@ -123,6 +125,7 @@ module Rack
 
     def increment_requests
       map[:requests] += 1
+      map[:request_uris] << env["REQUEST_URI"]
     end
 
     def exceeded_request_threshold?
