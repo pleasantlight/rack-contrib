@@ -131,7 +131,7 @@ module Rack
     def increment_requests
       map[:requests] += 1
       rails_logger "Current Request: #{@env["REQUEST_URI"]}"
-      map[:request_uris] = map[:request_uris]  << @env["REQUEST_URI"]
+      map[:request_uris] = map[:request_uris]  << "#{@env["REQUEST_METHOD"]} '#{@env["REQUEST_URI"]}' #{} => #{@env["HTTP_USER_AGENT"]}"
     end
 
     def exceeded_request_threshold?
