@@ -59,7 +59,8 @@ module Rack
     end
 
     def call env
-      if options[:ignore_agents].any? {|word| env["HTTP_USER_AGENT"].downcase.include?(word) }
+      if options[:ignore_agents].any? {|word| env["HTTP_USER_AGENT"].to_s.downcase.include?(word) }
+        rails_logger "Skipping user agent #{env["HTTP_USER_AGENT"]}"
         status, headers, body = @app.call env
         [status, headers, body]
       else
