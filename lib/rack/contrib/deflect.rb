@@ -29,6 +29,7 @@ module Rack
   #   :block_duration     Duration in seconds that a remote address will be blocked. Defaults to 900 (15 minutes)
   #   :whitelist          Array of remote addresses which bypass Deflect. NOTE: this does not block others
   #   :blacklist          Array of remote addresses immediately considered malicious
+  #   :ignore_agents      a list of words from user agents allow in.
   #
   # === Examples:
   #
@@ -52,14 +53,20 @@ module Rack
         :interval => 5,
         :block_duration => 900,
         :whitelist => [],
-        :blacklist => []
+        :blacklist => [],
+        :ignore_agents => []
       }.merge(options)
     end
 
     def call env
-      return deflect! if deflect? env
-      status, headers, body = @app.call env
-      [status, headers, body]
+      if options[:ignore_agents].any? {|word| env["HTTP_USER_AGENT"].downcase.include?(word) }
+        status, headers, body = @app.call env
+        [status, headers, body]
+      else
+        return deflect! if deflect? env
+        status, headers, body = @app.call env
+        [status, headers, body]
+      end
     end
 
     def deflect!
