@@ -16,7 +16,14 @@ context "Rack::Deflect" do
   end
 
   def mock_deflect options = {}
+    notifier_callback = Proc.new do |blocked_addr, hostname, requested_uris|
+      puts "\n~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~- #{hostname} blocked IP address #{blocked_addr}. Corresponding requested_uris array has #{requested_uris.nil? ? "0" : requested_uris.len} elements. ~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-"
+    end
+    
+    options.merge! (:reset_for => [@mock_addr_1, @mock_addr_2, @mock_addr_3])
+    options.merge! (:notifier_callback => notifier_callback)
     Rack::Deflect.new @app, options
+    
   end
 
   specify "should allow regular requests to follow through" do
@@ -32,7 +39,7 @@ context "Rack::Deflect" do
     env = mock_env @mock_addr_1
 
     # First 5 should be fine
-    5.times do
+    5.times do |i|
       status, headers, body = app.call env
       status.should.equal 200
       body.should.equal ['cookies']
@@ -55,7 +62,7 @@ context "Rack::Deflect" do
     env = mock_env @mock_addr_1
 
     # First 5 should be fine
-    5.times do
+    5.times do |i|
       status, headers, body = app.call env
       status.should.equal 200
       body.should.equal ['cookies']
@@ -77,7 +84,8 @@ context "Rack::Deflect" do
     end
 
     # Log should reflect block and release
-    log.string.should.match(/deflect.*: blocked 111\.111\.111\.111\ndeflect.*: released 111\.111\.111\.111\n/)
+    log.string.should.match(/deflect.*: blocked 111\.111\.111\.111/)
+    log.string.should.match(/deflect.*: released 111\.111\.111\.111/)
   end
 
   specify "should allow whitelisting of remote addresses" do

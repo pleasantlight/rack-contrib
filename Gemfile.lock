@@ -1,0 +1,20 @@
+GEM
+  remote: http://rubygems.org/
+  specs:
+    json (1.5.1)
+    rack (1.2.2)
+    rake (0.8.7)
+    redis (2.2.0)
+    test-spec (0.10.0)
+    tmail (1.2.7.1)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  json (>= 1.1)
+  rack (>= 0.9.1)
+  rake
+  redis
+  test-spec (>= 0.9.0)
+  tmail (>= 1.2)

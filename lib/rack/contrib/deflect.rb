@@ -1,5 +1,7 @@
 require 'thread'
 require 'socket'
+require 'redis'
+
 # TODO: optional stats
 # TODO: performance
 # TODO: clean up tests
@@ -30,6 +32,8 @@ module Rack
   #   :whitelist          Array of remote addresses which bypass Deflect. NOTE: this does not block others
   #   :blacklist          Array of remote addresses immediately considered malicious
   #   :ignore_agents      a list of words from user agents allow in.
+  #   :redis_interface    The IP and port of the REDIS server that will be used.
+  #   :notifier_callback  A callback that will be used for important notifications.
   #
   # === Examples:
   #
@@ -41,10 +45,10 @@ module Rack
   class Deflect
 
     attr_reader :options
+    attr_accessor :redis_storage
 
     def initialize app, options = {}
       @mutex = Mutex.new
-      @remote_addr_map = {}
       @app, @options = app, {
         :log => false,
         :log_format => 'deflect(%s): %s',
@@ -54,13 +58,23 @@ module Rack
         :block_duration => 900,
         :whitelist => [],
         :blacklist => [],
-        :ignore_agents => []
+        :ignore_agents => [],
+        :redis_interface => { :host => "127.0.0.1", :port => "6379" },
+        :notifier_callback => nil
       }.merge(options)
+      
+      @redis_storage = Redis.new(@options[:redis_interface])
+      
+      unless @options[:reset_for].nil?
+        @options[:reset_for].each do |addr|
+          clear_for_address(addr)
+        end
+      end
     end
 
     def call env
-      if options[:ignore_agents].any? {|word| env["HTTP_USER_AGENT"].to_s.downcase.include?(word) }
-        rails_logger "Skipping user agent #{env["HTTP_USER_AGENT"]}"
+      if @options[:ignore_agents].any? {|word| env["HTTP_USER_AGENT"].to_s.downcase.include?(word) }
+        log "Skipping user agent #{env["HTTP_USER_AGENT"]}"
         status, headers, body = @app.call env
         [status, headers, body]
       else
@@ -77,26 +91,18 @@ module Rack
     def deflect? env
       @env = env
       @remote_addr = env['REMOTE_ADDR']
-      return false if options[:whitelist].include? @remote_addr
-      return true  if options[:blacklist].include? @remote_addr
+      return false if @options[:whitelist].include? @remote_addr
+      return true  if @options[:blacklist].include? @remote_addr
       sync { watch }
     end
 
     def log message
-      return unless options[:log]
-      options[:log].puts(options[:log_format] % [Time.now.strftime(options[:log_date_format]), message])
+      return unless @options[:log]
+      @options[:log].puts(@options[:log_format] % [Time.now.strftime(@options[:log_date_format]), message])
     end
 
     def sync &block
       @mutex.synchronize(&block)
-    end
-
-    def map
-      @remote_addr_map[@remote_addr] ||= {
-        :expires => Time.now + options[:interval],
-        :requests => 0,
-        :request_uris => []
-      }
     end
 
     def watch
@@ -110,45 +116,75 @@ module Rack
     def block!
       return if blocked?
       log "blocked #{@remote_addr}"
-      Notifier.deliver_ip_blocked(@remote_addr, Socket.gethostname, map[:request_uris])
-      map[:block_expires] = Time.now + options[:block_duration]
+      rset("block_expires", Time.now + @options[:block_duration])
+      notifier = @options[:notifier_callback]
+      blocked_uris = rget("requested_uris")
+      notifier.call(@remote_addr, Socket.gethostname, blocked_uris) unless notifier.nil?
     end
 
     def blocked?
-      map.has_key? :block_expires
+      !(rget("block_expires").nil?)
     end
 
-    def block_expired?
-      map[:block_expires] < Time.now rescue false
+    def block_expired?      
+      block_expires_str = rget("block_expires")
+      !(block_expires_str.nil?) && (Time.parse(block_expires_str) < Time.now) rescue false
     end
 
     def watching?
-      @remote_addr_map.has_key? @remote_addr
+      Integer(rget('requests')) > 0
     end
 
     def clear!
       return unless watching?
       log "released #{@remote_addr}" if blocked?
-      @remote_addr_map.delete @remote_addr
+      clear_for_address(@remote_addr)
     end
 
-    def rails_logger(message)
-      RAILS_DEFAULT_LOGGER.info "Rack::Deflect = #{message}"
+    def clear_for_address(address)
+      rdel("block_expires", address)
+      rdel("requests", address)
+      rdel("request_uris", address)
     end
     
     def increment_requests
-      map[:requests] += 1
-      rails_logger "Current Request: #{@env["REQUEST_URI"]}"
-      map[:request_uris] = map[:request_uris]  << "#{@env["REQUEST_METHOD"]} '#{@env["HTTP_HOST"]}#{@env["REQUEST_URI"]}' #{} => #{@env["HTTP_USER_AGENT"]}"
+      rincr("requests")
+      log "Current Request: #{@env["REQUEST_URI"]}"
+      rrpush("request_uris", "#{@env["REQUEST_METHOD"]} '#{@env["HTTP_HOST"]}#{@env["REQUEST_URI"]}' #{} => #{@env["HTTP_USER_AGENT"]}")
     end
 
     def exceeded_request_threshold?
-      map[:requests] > options[:request_threshold]
+      Integer(rget("requests")) > @options[:request_threshold]
     end
 
     def watch_expired?
-      map[:expires] <= Time.now
+      expires_str = rget("block_expires")
+      !(expires_str.nil?) && (Time.parse(rget("block_expires")) <= Time.now) rescue false
     end
 
+    # Redis-related functions:
+    def rkey(key, addr=@remote_addr)
+      "#{addr}:#{key}"
+    end
+    
+    def rset(key, val, addr=@remote_addr)
+      @redis_storage.set(rkey(key, addr), val)
+    end
+    
+    def rget(key, addr=@remote_addr)
+      @redis_storage.get(rkey(key, addr))
+    end
+    
+    def rdel(key, addr=@remote_addr)
+      @redis_storage.del(rkey(key, addr))
+    end
+    
+    def rincr(key, addr=@remote_addr)
+      @redis_storage.incr(rkey(key, addr))
+    end
+    
+    def rrpush(key, val, addr=@remote_addr)
+      @redis_storage.rpush(rkey(key, addr), val)
+    end
   end
 end
