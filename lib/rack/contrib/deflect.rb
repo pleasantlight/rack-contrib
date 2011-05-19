@@ -49,6 +49,7 @@ module Rack
 
     def initialize app, options = {}
       @mutex = Mutex.new
+      @local_storage_map = {}
       @app, @options = app, {
         :log => false,
         :log_format => 'deflect(%s): %s',
@@ -63,7 +64,12 @@ module Rack
         :notifier_callback => nil
       }.merge(options)
       
-      @redis_storage = Redis.new(@options[:redis_interface])
+      @redis_storage = nil
+      begin
+        Redis.new(@options[:redis_interface]) unless @options[:redis_interface].blank?
+      rescue Timeout::Error
+        # No redis.
+      end
       
       unless @options[:reset_for].nil?
         @options[:reset_for].each do |addr|
@@ -73,7 +79,7 @@ module Rack
     end
 
     def call env
-      if @options[:ignore_agents].any? {|word| env["HTTP_USER_AGENT"].to_s.downcase.include?(word) }
+      if options[:ignore_agents].any? {|word| env["HTTP_USER_AGENT"].to_s.downcase.include?(word) }
         log "Skipping user agent #{env["HTTP_USER_AGENT"]}"
         status, headers, body = @app.call env
         [status, headers, body]
@@ -91,14 +97,14 @@ module Rack
     def deflect? env
       @env = env
       @remote_addr = env['REMOTE_ADDR']
-      return false if @options[:whitelist].include? @remote_addr
-      return true  if @options[:blacklist].include? @remote_addr
+      return false if options[:whitelist].include? @remote_addr
+      return true  if options[:blacklist].include? @remote_addr
       sync { watch }
     end
 
     def log message
-      return unless @options[:log]
-      @options[:log].puts(@options[:log_format] % [Time.now.strftime(@options[:log_date_format]), message])
+      return unless options[:log]
+      options[:log].puts(options[:log_format] % [Time.now.strftime(options[:log_date_format]), message])
     end
 
     def sync &block
@@ -107,6 +113,8 @@ module Rack
 
     def watch
       increment_requests
+      init_local_storage_map(@remote_addr)
+      set_key("expires", Time.now + options[:interval])
       clear! if watch_expired? and not blocked?
       clear! if blocked? and block_expired?
       block! if watching? and exceeded_request_threshold?
@@ -116,23 +124,23 @@ module Rack
     def block!
       return if blocked?
       log "blocked #{@remote_addr}"
-      rset("block_expires", Time.now + @options[:block_duration])
-      notifier = @options[:notifier_callback]
-      blocked_uris = rget("requested_uris")
+      set_key("block_expires", (Time.now + options[:block_duration]).to_s)
+      notifier = options[:notifier_callback]
+      blocked_uris = get_key("requested_uris")
       notifier.call(@remote_addr, Socket.gethostname, blocked_uris) unless notifier.nil?
     end
 
     def blocked?
-      !(rget("block_expires").nil?)
+      !(get_key("block_expires").nil?)
     end
 
     def block_expired?      
-      block_expires_str = rget("block_expires")
+      block_expires_str = get_key("block_expires")
       !(block_expires_str.nil?) && (Time.parse(block_expires_str) < Time.now) rescue false
     end
 
     def watching?
-      Integer(rget('requests')) > 0
+      Integer(get_key('requests')) > 0
     end
 
     def clear!
@@ -142,49 +150,71 @@ module Rack
     end
 
     def clear_for_address(address)
-      rdel("block_expires", address)
-      rdel("requests", address)
-      rdel("request_uris", address)
+      del_key("expires", address)
+      del_key("block_expires", address)
+      del_key("requests", address)
+      del_key("request_uris", address)
     end
     
     def increment_requests
-      rincr("requests")
+      incr_key("requests")
       log "Current Request: #{@env["REQUEST_URI"]}"
       rrpush("request_uris", "#{@env["REQUEST_METHOD"]} '#{@env["HTTP_HOST"]}#{@env["REQUEST_URI"]}' #{} => #{@env["HTTP_USER_AGENT"]}")
     end
 
     def exceeded_request_threshold?
-      Integer(rget("requests")) > @options[:request_threshold]
+      Integer(get_key("requests")) > options[:request_threshold]
     end
 
     def watch_expired?
-      expires_str = rget("block_expires")
-      !(expires_str.nil?) && (Time.parse(rget("block_expires")) <= Time.now) rescue false
+      expires_str = get_key("expires")
+      !(expires_str.blank?) && (Time.parse(expires_str) <= Time.now) rescue false
+    end
+    
+    def init_local_storage_map(addr)
+      @local_storage_map[addr] = {
+        :expires => Time.now + options[:interval],
+        :requests => 0,
+        :request_uris => []
+      }
     end
 
-    # Redis-related functions:
-    def rkey(key, addr=@remote_addr)
+    def redis_key(key, addr=@remote_addr)
       "#{addr}:#{key}"
     end
     
-    def rset(key, val, addr=@remote_addr)
-      @redis_storage.set(rkey(key, addr), val)
+    def set_key(key, val, addr=@remote_addr)
+      @local_storage_map[addr.to_sym] = {} if @local_storage_map[addr.to_sym].nil?
+      @local_storage_map[addr.to_sym][key.to_sym] = val
+      @redis_storage.set(redis_key(key, addr), val) unless @redis_storage.nil?
     end
     
-    def rget(key, addr=@remote_addr)
-      @redis_storage.get(rkey(key, addr))
+    def get_key(key, addr=@remote_addr)
+      val = @redis_storage.get(redis_key(key, addr)) unless @redis_storage.nil?
+      val = @local_storage_map[addr.to_sym][key.to_sym] if val.nil? && !(@local_storage_map[addr.to_sym].nil?)
+      val
     end
     
-    def rdel(key, addr=@remote_addr)
-      @redis_storage.del(rkey(key, addr))
+    def del_key(key, addr=@remote_addr)
+      @local_storage_map[addr.to_sym].delete(key.to_sym) unless @local_storage_map[addr.to_sym].nil?
+      @redis_storage.del(redis_key(key, addr)) unless @redis_storage.nil?
     end
     
-    def rincr(key, addr=@remote_addr)
-      @redis_storage.incr(rkey(key, addr))
+    def incr_key(key, addr=@remote_addr)
+      @local_storage_map[addr.to_sym] = {} if @local_storage_map[addr.to_sym].nil?
+      @local_storage_map[addr.to_sym][key.to_sym] = (@local_storage_map[addr.to_sym][key.to_sym].nil? ? 0 : @local_storage_map[addr.to_sym][key.to_sym]) + 1
+      @redis_storage.incr(redis_key(key, addr)) unless @redis_storage.nil?
     end
     
     def rrpush(key, val, addr=@remote_addr)
-      @redis_storage.rpush(rkey(key, addr), val)
+      @local_storage_map[addr.to_sym] = {} if @local_storage_map[addr.to_sym].nil?
+      if @local_storage_map[addr.to_sym][key.to_sym]
+        @local_storage_map[addr.to_sym][key.to_sym] << val
+      else
+        @local_storage_map[addr.to_sym][key.to_sym] = [val]
+      end
+        
+      @redis_storage.rpush(redis_key(key, addr), val) unless @redis_storage.nil?
     end
   end
 end
