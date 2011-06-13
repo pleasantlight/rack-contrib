@@ -53,7 +53,7 @@ module Rack
       @local_storage_map = {}
       @app, @options = app, {
         :log => false,
-        :log_format => "",
+        :log_format => "Deflect  %s  %s",
         :log_date_format => '%m/%d/%Y %H:%M:%S',
         :request_threshold => 100,
         :interval => 5,
@@ -71,10 +71,6 @@ module Rack
         @redis_storage = Redis.new(@options[:redis_connection_params]) unless @options[:redis_connection_params].blank?
       rescue Timeout::Error
         # No redis.
-      end
-      
-      if (@options[:log].blank?)
-        @options[:log] = "Deflect (#{@redis_storage.nil? ? "Local" : "Redis"})  %s  %s"
       end
       
       if @options[:fresh_start] == true && @redis_storage.present? 
@@ -110,7 +106,7 @@ module Rack
 
     def log message
       return unless options[:log]
-      options[:log].puts(options[:log_format] % [Time.now.strftime(options[:log_date_format]), message])
+      options[:log].puts(options[:log_format] % [Time.now.strftime(options[:log_date_format]), (@redis_storage.nil? ? "(Local)" : "(Redis)") + message])
     end
 
     def sync &block
