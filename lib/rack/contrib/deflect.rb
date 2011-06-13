@@ -54,7 +54,7 @@ module Rack
       @app, @options = app, {
         :log => false,
         :log_format => 'deflect(%s): %s',
-        :log_date_format => '%m/%d/%Y',
+        :log_date_format => '%m/%d/%Y %H:%M:%S',
         :request_threshold => 100,
         :interval => 5,
         :block_duration => 900,
@@ -124,20 +124,30 @@ module Rack
 
     def block!
       return if blocked?
-      log "blocked #{@remote_addr}"
-      set_key("block_expires", (Time.now + options[:block_duration]).to_s)
+      block_until = Time.now + options[:block_duration]
+      log "NEW BLOCK: blocking #{@remote_addr} until #{block_until.to_s}."
+      set_key("block_expires", block_until.to_s)
       notifier = options[:notifier_callback]
       blocked_uris = get_key("requested_uris")
       notifier.call(@remote_addr, Socket.gethostname, blocked_uris) unless notifier.nil?
     end
 
     def blocked?
-      !(get_key("block_expires").nil?)
+      block_expires = get_key("block_expires")
+      is_blocked = !(block_expires.nil?)
+      if (is_blocked)
+        log "BLOCKED: IP #{@remote_addr} is blocked until #{block_expires}."
+      end
+      is_blocked
     end
 
     def block_expired?      
       block_expires_str = get_key("block_expires")
-      !(block_expires_str.nil?) && (Time.parse(block_expires_str) < Time.now) rescue false
+      block_has_expired = !(block_expires_str.nil?) && (Time.parse(block_expires_str) < Time.now) rescue false
+      if block_has_expired
+        log "BLOCK EXPIRED: Block for IP #{@remote_addr} has expired (was blocked until #{block_expires_str})."
+      end
+      block_has_expired
     end
 
     def watching?
@@ -146,7 +156,7 @@ module Rack
 
     def clear!
       return unless watching?
-      log "released #{@remote_addr}" if blocked?
+      log "BLOCK RELEASED: released #{@remote_addr}" if blocked?
       clear_for_address(@remote_addr)
     end
 
