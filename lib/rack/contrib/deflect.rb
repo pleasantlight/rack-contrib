@@ -78,7 +78,10 @@ module Rack
         saved_keys.each { |key_name| @redis_storage.del key_name }
       end      
 
-      @greeting_displayed = false
+      log "********************************************************************************"
+      log "Deflector started up. Using #{@redis_storage.nil? ? "local storage" : "Redis"}."
+      log "Redis made a FRESH START!" if @options[:fresh_start] == true && @redis_storage.present? 
+      log "********************************************************************************"
     end
 
     def call env      
@@ -98,10 +101,6 @@ module Rack
     end
 
     def deflect? env
-      if @greeting_displayed == false
-        display_greeting
-      end
-
       @env = env
       @remote_addr = env['REMOTE_ADDR']
       return false if options[:whitelist].include? @remote_addr
@@ -110,20 +109,10 @@ module Rack
     end
 
     def log message
-      puts "*** #{message}"
       return unless options[:log]
       options[:log].puts(options[:log_format] % [Time.now.strftime(options[:log_date_format]), message])
     end
 
-    def display_greeting
-      log "********************************************************************************"
-      log "Deflector started up. Using #{@redis_storage.nil? ? "local storage" : "Redis"}."
-      log "Redis made a FRESH START!" if @options[:fresh_start] == true && @redis_storage.present? 
-      log "********************************************************************************"
-
-      @greeting_displayed = true
-    end
-    
     def sync &block
       @mutex.synchronize(&block)
     end
