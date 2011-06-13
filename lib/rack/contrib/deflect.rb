@@ -73,19 +73,15 @@ module Rack
         # No redis.
       end
       
-      log "********************************************************************************"
-      log "Deflector started up. Using #{@redis_storage.nil? ? "local storage" : "Redis"}."
-
       if @options[:fresh_start] == true && @redis_storage.present? 
         saved_keys = @redis_storage.keys "Deflector*"
         saved_keys.each { |key_name| @redis_storage.del key_name }
-        log "Deflector made a FRESH START!"
       end      
 
-      log "********************************************************************************"
+      @greeting_displayed = false
     end
 
-    def call env
+    def call env      
       if options[:ignore_agents].any? {|word| env["HTTP_USER_AGENT"].to_s.downcase.include?(word) }
         log "Skipping user agent #{env["HTTP_USER_AGENT"]}"
         status, headers, body = @app.call env
@@ -102,6 +98,10 @@ module Rack
     end
 
     def deflect? env
+      if @greeting_displayed == false
+        display_greeting
+      end
+
       @env = env
       @remote_addr = env['REMOTE_ADDR']
       return false if options[:whitelist].include? @remote_addr
@@ -115,6 +115,15 @@ module Rack
       options[:log].puts(options[:log_format] % [Time.now.strftime(options[:log_date_format]), message])
     end
 
+    def display_greeting
+      log "********************************************************************************"
+      log "Deflector started up. Using #{@redis_storage.nil? ? "local storage" : "Redis"}."
+      log "Redis made a FRESH START!" if @options[:fresh_start] == true && @redis_storage.present? 
+      log "********************************************************************************"
+
+      @greeting_displayed = true
+    end
+    
     def sync &block
       @mutex.synchronize(&block)
     end
