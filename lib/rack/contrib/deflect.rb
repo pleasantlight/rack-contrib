@@ -53,7 +53,7 @@ module Rack
       @local_storage_map = {}
       @app, @options = app, {
         :log => false,
-        :log_format => 'deflect(%s): %s',
+        :log_format => "deflect (#{@redis_storage.nil? ? "Local" : "Redis"})  %s  %s",
         :log_date_format => '%m/%d/%Y %H:%M:%S',
         :request_threshold => 100,
         :interval => 5,
@@ -76,12 +76,8 @@ module Rack
       if @options[:fresh_start] == true && @redis_storage.present? 
         saved_keys = @redis_storage.keys "Deflector*"
         saved_keys.each { |key_name| @redis_storage.del key_name }
+        log "Redis made a FRESH START!"
       end      
-
-      log "********************************************************************************"
-      log "Deflector started up. Using #{@redis_storage.nil? ? "local storage" : "Redis"}."
-      log "Redis made a FRESH START!" if @options[:fresh_start] == true && @redis_storage.present? 
-      log "********************************************************************************"
     end
 
     def call env      
