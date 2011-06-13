@@ -73,10 +73,16 @@ module Rack
         # No redis.
       end
       
+      log "********************************************************************************"
+      log "Deflector started up. Using #{@redis_storage.nil? ? "local storage" : "Redis"}."
+
       if @options[:fresh_start] == true && @redis_storage.present? 
         saved_keys = @redis_storage.keys "Deflector*"
         saved_keys.each { |key_name| @redis_storage.del key_name }
-      end
+        log "Deflector made a FRESH START!"
+      end      
+
+      log "********************************************************************************"
     end
 
     def call env
