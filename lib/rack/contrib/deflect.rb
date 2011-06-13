@@ -106,7 +106,7 @@ module Rack
 
     def log message
       return unless options[:log]
-      options[:log].puts(options[:log_format] % [Time.now.strftime(options[:log_date_format]), (@redis_storage.nil? ? "(Local)" : "(Redis)") + message])
+      options[:log].puts(options[:log_format] % [Time.now.strftime(options[:log_date_format]), (@redis_storage.nil? ? "(Local)" : "(Redis)") + "  " + message])
     end
 
     def sync &block
