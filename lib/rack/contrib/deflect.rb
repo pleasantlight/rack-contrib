@@ -61,16 +61,25 @@ module Rack
         :blacklist => [],
         :ignore_agents => [],
         :redis_interface => { :host => "127.0.0.1", :port => "6379" },
-        :notifier_callback => nil
+        :notifier_callback => nil,
+        :fresh_start => false
       }.merge(options)
       
       @redis_storage = nil
       begin
-        Redis.new(@options[:redis_interface]) unless @options[:redis_interface].blank?
+        @redis_storage = Redis.new(@options[:redis_interface]) unless @options[:redis_interface].blank?
       rescue Timeout::Error
         # No redis.
       end
       
+      if @options[:fresh_start] == true && @redis_storage.present? 
+        
+        # TODO: check if it's possible to delete keys by using a wildcard option.
+        saved_keys = @redis_storage.keys "Deflector*"
+        saved_keys.each do |key_name|
+          @redis_storage.del key_name
+        end
+      end
       unless @options[:reset_for].nil?
         @options[:reset_for].each do |addr|
           clear_for_address(addr)
@@ -140,7 +149,7 @@ module Rack
     end
 
     def watching?
-      Integer(get_key('requests')) > 0
+      get_key('requests').to_i > 0
     end
 
     def clear!
@@ -163,7 +172,7 @@ module Rack
     end
 
     def exceeded_request_threshold?
-      Integer(get_key("requests")) > options[:request_threshold]
+      get_key("requests").to_i > options[:request_threshold].to_i
     end
 
     def watch_expired?
@@ -180,7 +189,7 @@ module Rack
     end
 
     def redis_key(key, addr=@remote_addr)
-      "#{addr}:#{key}"
+      "Deflector::#{addr}:#{key}"
     end
     
     def set_key(key, val, addr=@remote_addr)
