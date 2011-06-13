@@ -104,6 +104,7 @@ module Rack
     end
 
     def log message
+      puts "*** #{message}"
       return unless options[:log]
       options[:log].puts(options[:log_format] % [Time.now.strftime(options[:log_date_format]), message])
     end
