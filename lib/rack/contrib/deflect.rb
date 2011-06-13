@@ -23,17 +23,18 @@ module Rack
   #
   # === Options:
   #
-  #   :log                When false logging will be bypassed, otherwise pass an object responding to #puts
-  #   :log_format         Alter the logging format
-  #   :log_date_format    Alter the logging date format
-  #   :request_threshold  Number of requests allowed within the set :interval. Defaults to 100
-  #   :interval           Duration in seconds until the request counter is reset. Defaults to 5
-  #   :block_duration     Duration in seconds that a remote address will be blocked. Defaults to 900 (15 minutes)
-  #   :whitelist          Array of remote addresses which bypass Deflect. NOTE: this does not block others
-  #   :blacklist          Array of remote addresses immediately considered malicious
-  #   :ignore_agents      a list of words from user agents allow in.
-  #   :redis_interface    The IP and port of the REDIS server that will be used.
-  #   :notifier_callback  A callback that will be used for important notifications.
+  #   :log                          When false logging will be bypassed, otherwise pass an object responding to #puts
+  #   :log_format                   Alter the logging format
+  #   :log_date_format              Alter the logging date format
+  #   :request_threshold            Number of requests allowed within the set :interval. Defaults to 100
+  #   :interval                     Duration in seconds until the request counter is reset. Defaults to 5
+  #   :block_duration               Duration in seconds that a remote address will be blocked. Defaults to 900 (15 minutes)
+  #   :whitelist                    Array of remote addresses which bypass Deflect. NOTE: this does not block others
+  #   :blacklist                    Array of remote addresses immediately considered malicious
+  #   :ignore_agents                a list of words from user agents allow in.
+  #   :redis_connection_params      The IP and port of the REDIS server that will be used.
+  #   :notifier_callback            A callback that will be used for important notifications.
+  #   :fresh_start                  Remove all deflect-related keys from the Redis server before starting up.
   #
   # === Examples:
   #
@@ -60,30 +61,21 @@ module Rack
         :whitelist => [],
         :blacklist => [],
         :ignore_agents => [],
-        :redis_interface => { :host => "127.0.0.1", :port => "6379" },
+        :redis_connection_params => { :host => "127.0.0.1", :port => "6379" },
         :notifier_callback => nil,
         :fresh_start => false
       }.merge(options)
       
       @redis_storage = nil
       begin
-        @redis_storage = Redis.new(@options[:redis_interface]) unless @options[:redis_interface].blank?
+        @redis_storage = Redis.new(@options[:redis_connection_params]) unless @options[:redis_connection_params].blank?
       rescue Timeout::Error
         # No redis.
       end
       
       if @options[:fresh_start] == true && @redis_storage.present? 
-        
-        # TODO: check if it's possible to delete keys by using a wildcard option.
         saved_keys = @redis_storage.keys "Deflector*"
-        saved_keys.each do |key_name|
-          @redis_storage.del key_name
-        end
-      end
-      unless @options[:reset_for].nil?
-        @options[:reset_for].each do |addr|
-          clear_for_address(addr)
-        end
+        saved_keys.each { |key_name| @redis_storage.del key_name }
       end
     end
 
