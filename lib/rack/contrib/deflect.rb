@@ -138,9 +138,12 @@ module Rack
         @block_duration = redis_block_duration.to_i
       end
       
-      @whitelist = @redis_storage.get("deflector::whitelist") || @options[:whitelist]
-      @blacklist = @redis_storage.get("deflector::blacklist") || @options[:blacklist]
-      @ignore_agents = @redis_storage.get("deflector::ignore_agents") || @options[:ignore_agents]
+      @whitelist = @redis_storage.get("deflector::whitelist") || []
+      @whitelist |= @options[:whitelist]
+      @blacklist = @redis_storage.get("deflector::blacklist") || []
+      @blacklist |= @options[:blacklist]
+      @ignore_agents = @redis_storage.get("deflector::ignore_agents") || []
+      @ignore_agents |= @options[:ignore_agents]
       
       @last_updated_config_at = Time.now
     end
