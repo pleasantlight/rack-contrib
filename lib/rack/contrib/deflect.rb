@@ -159,6 +159,7 @@ module Rack
       @remote_addr = env['REMOTE_ADDR']
       log("Deflector is disabled...") unless @deflector_enabled
       return false unless @deflector_enabled
+      log("Deflector is enabled...")
       return false if @whitelist.include? @remote_addr
       return true  if @blacklist.include? @remote_addr
       sync { watch }
