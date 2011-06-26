@@ -87,6 +87,7 @@ module Rack
       @whitelist = options[:whitelist]
       @blacklist = options[:blacklist]
       @ignore_agents = options[:ignore_agents]
+      @deflector_enabled = true
       
       update_config_from_redis
     end
@@ -98,7 +99,7 @@ module Rack
         [status, headers, body]
       else
         update_config_from_redis
-        return deflect! if deflect? env
+        return deflect! if (@deflector_enabled && deflect? env)
         status, headers, body = @app.call env
         [status, headers, body]
       end
@@ -108,6 +109,12 @@ module Rack
     def update_config_from_redis
       return unless @redis_storage
       return if @last_updated_config_at.present? && Time.now - @last_updated_config_at < @options[:update_config_every]
+      
+      redis_deflector_enabled = @redis_storage.get("fiverr_config::rack_deflect::enabled")
+      if redis_deflector_enabled.present? && (redis_deflector_enabled.downcase == "false" || redis_deflector_enabled.downcase == "no" || redis_deflector_enabled == "0")
+        @deflector_enabled = false
+      else
+        @deflector_enabled = true
       
       redis_request_threshold = @redis_storage.get("fiverr_config::rack_deflect::request_threshold")
       @request_threshold = redis_request_threshold.to_i unless redis_request_threshold.nil?
