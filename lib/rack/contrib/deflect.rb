@@ -62,13 +62,13 @@ module Rack
         :blacklist => [],
         :ignore_agents => [],
         :redis_connection_params => { :host => "127.0.0.1", :port => "6379" },
-        :update_block_lists_every => 60,
+        :update_config_every => 60,
         :notifier_callback => nil,
         :fresh_start => false
       }.merge(options)
       
       @redis_storage = nil
-      @last_updated_block_lists_at = nil
+      @last_updated_config_at = nil
       begin
         @redis_storage = Redis.new(@options[:redis_connection_params]) unless @options[:redis_connection_params].blank?
       rescue Timeout::Error
@@ -81,9 +81,14 @@ module Rack
         log "Redis made a FRESH START!"
       end
       
+      @request_threshold = options[:request_threshold]
+      @interval = options[:interval]
+      @block_duration = options[:block_duration]
       @whitelist = options[:whitelist]
       @blacklist = options[:blacklist]
       @ignore_agents = options[:ignore_agents]
+      
+      update_config_from_redis
     end
 
     def call env      
@@ -92,21 +97,32 @@ module Rack
         status, headers, body = @app.call env
         [status, headers, body]
       else
-        update_block_lists
+        update_config_from_redis
         return deflect! if deflect? env
         status, headers, body = @app.call env
         [status, headers, body]
       end
     end
 
-    # Update white/blacklists from Redis. Note that this is only applicable when using the REDIS storage.
-    def update_block_lists
+    # Update configuration from Redis. Note that this is only applicable when using the REDIS storage.
+    def update_config_from_redis
       return unless @redis_storage
-      return if @last_updated_block_lists_at.present? && Time.now - @last_updated_block_lists_at < @options[:update_block_lists_every]
-      @whitelist = @redis_storage.get("Deflector::whitelist") | @options[:whitelist]
-      @blacklist = @redis_storage.get("Deflector::blacklist") | @options[:blacklist]
-      @ignore_agents = @redis_storage.get("Deflector::ignore_agents") | @options[:ignore_agents]
-      @last_updated_block_lists_at = Time.now
+      return if @last_updated_config_at.present? && Time.now - @last_updated_config_at < @options[:update_config_every]
+      
+      redis_request_threshold = @redis_storage.get("fiverr_config::rack_deflect::request_threshold")
+      @request_threshold = redis_request_threshold.to_i unless redis_request_threshold.nil?
+      
+      redis_interval = @redis_storage.get("fiverr_config::rack_deflect::interval")
+      @interval = redis_interval.to_i unless redis_interval.nil?
+      
+      redis_block_duration = @redis_storage.get("fiverr_config::rack_deflect::block_duration")
+      @block_duration = redis_block_duration.to_i unless redis_block_duration.nil?
+      
+      @whitelist = @redis_storage.get("deflector::whitelist") | @options[:whitelist]
+      @blacklist = @redis_storage.get("deflector::blacklist") | @options[:blacklist]
+      @ignore_agents = @redis_storage.get("deflector::ignore_agents") | @options[:ignore_agents]
+      
+      @last_updated_config_at = Time.now
     end
     
     def deflect!
@@ -133,7 +149,6 @@ module Rack
     def watch
       increment_requests
       init_local_storage_map(@remote_addr)
-      set_key("expires", Time.now + options[:interval])
       clear! if watch_expired? and not blocked?
       clear! if blocked? and block_expired?
       block! if watching? and exceeded_request_threshold?
@@ -142,7 +157,7 @@ module Rack
 
     def block!
       return if blocked?
-      block_until = Time.now + options[:block_duration]
+      block_until = Time.now + @block_duration
       log "NEW BLOCK: blocking #{@remote_addr} until #{block_until.to_s}."
       set_key("block_expires", block_until.to_s)
       notifier = options[:notifier_callback]
@@ -150,8 +165,8 @@ module Rack
       
       if @redis_storage.present?
         # push the new blocked ip into the 'recently deflected' ip list in redis.
-        list_size = @redis_storage.lpush("Deflector::recently_deflected_ips", "#{@remote_addr}|#{block_until.to_s}")
-        @redis_storage.ltrim("Deflector::recently_deflected_ips", 0, 99) if list_size > 100
+        list_size = @redis_storage.lpush("deflector::recently_deflected_ips", "#{@remote_addr}|#{block_until.to_s}")
+        @redis_storage.ltrim("deflector::recently_deflected_ips", 0, 99) if list_size > 100
       end
       
       notifier.call(@remote_addr, Socket.gethostname, blocked_uris) unless notifier.nil?
@@ -199,24 +214,31 @@ module Rack
     end
 
     def exceeded_request_threshold?
-      get_key("requests").to_i > options[:request_threshold].to_i
+      get_key("requests").to_i > @request_threshold
     end
 
     def watch_expired?
+      expired = false;
       expires_str = get_key("expires")
-      !(expires_str.blank?) && (Time.parse(expires_str) <= Time.now) rescue false
+      if expires_str.blank?
+        set_key("expires", Time.now + @interval)
+      else
+        expired = (Time.parse(expires_str) <= Time.now) rescue false
+      end
+      
+      expired     
     end
     
     def init_local_storage_map(addr)
-      @local_storage_map[addr] = {
-        :expires => Time.now + options[:interval],
+      @local_storage_map[addr] ||= {
+        :expires => Time.now + @interval,
         :requests => 0,
         :request_uris => []
       }
     end
 
     def redis_key(key, addr=@remote_addr)
-      "Deflector::#{addr}:#{key}"
+      "deflector::#{addr}:#{key}"
     end
     
     def set_key(key, val, addr=@remote_addr)
