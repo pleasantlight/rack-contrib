@@ -99,7 +99,7 @@ module Rack
         [status, headers, body]
       else
         update_config_from_redis
-        return deflect! if (@deflector_enabled && deflect? env)
+        return deflect! if deflect? env
         status, headers, body = @app.call env
         [status, headers, body]
       end
@@ -148,6 +148,7 @@ module Rack
     def deflect? env
       @env = env
       @remote_addr = env['REMOTE_ADDR']
+      return false if @deflector_enabled == false
       return false if @whitelist.include? @remote_addr
       return true  if @blacklist.include? @remote_addr
       sync { watch }
