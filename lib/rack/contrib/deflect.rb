@@ -112,8 +112,10 @@ module Rack
       
       redis_deflector_enabled = @redis_storage.get("fiverr_config::rack_deflect::enabled")
       if redis_deflector_enabled.present? && (redis_deflector_enabled.downcase == "false" || redis_deflector_enabled.downcase == "no" || redis_deflector_enabled == "0")
+        log "*** REDIS says deflector is DISABLED - disabling..." if @deflector_enabled == true
         @deflector_enabled = false
       else
+        log "*** REDIS says deflector is ENABLED - enabling..." if @deflector_enabled == false
         @deflector_enabled = true
       end
       
