@@ -150,7 +150,7 @@ module Rack
       
       if @redis_storage.present?
         # push the new blocked ip into the 'recently deflected' ip list in redis.
-        list_size = @redis_storage.lpush("Deflector::recently_deflected_ips", "#{@remote_addr}:#{block_until.to_s}")
+        list_size = @redis_storage.lpush("Deflector::recently_deflected_ips", "#{@remote_addr}|#{block_until.to_s}")
         @redis_storage.ltrim("Deflector::recently_deflected_ips", 0, 99) if list_size > 100
       end
       
