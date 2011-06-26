@@ -76,7 +76,7 @@ module Rack
       end
       
       if @options[:fresh_start] == true && @redis_storage.present? 
-        saved_keys = @redis_storage.keys "Deflector*"
+        saved_keys = @redis_storage.keys "deflector::address*"
         saved_keys.each { |key_name| @redis_storage.del key_name }
         log "Redis made a FRESH START!"
       end
@@ -265,7 +265,7 @@ module Rack
     end
 
     def redis_key(key, addr=@remote_addr)
-      "deflector::#{addr}:#{key}"
+      "deflector::address::#{addr}:#{key}"
     end
     
     def set_key(key, val, addr=@remote_addr)
