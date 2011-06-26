@@ -115,24 +115,28 @@ module Rack
         @deflector_enabled = false
       else
         @deflector_enabled = true
+      end
       
       redis_request_threshold = @redis_storage.get("fiverr_config::rack_deflect::request_threshold")
       if redis_request_threshold.blank?
         @redis_storage.set("fiverr_config::rack_deflect::request_threshold", @request_threshold)
       else
         @request_threshold = redis_request_threshold.to_i
+      end
       
       redis_interval = @redis_storage.get("fiverr_config::rack_deflect::interval")
       if redis_interval.blank?
         @redis_storage.set("fiverr_config::rack_deflect::interval", @interval)
       else
         @interval = redis_interval.to_i
+      end
       
       redis_block_duration = @redis_storage.get("fiverr_config::rack_deflect::block_duration")
       if redis_block_duration.blank?
         @redis_storage.set("fiverr_config::rack_deflect::block_duration", @block_duration)
       else
         @block_duration = redis_block_duration.to_i
+      end
       
       @whitelist = @redis_storage.get("deflector::whitelist") | @options[:whitelist]
       @blacklist = @redis_storage.get("deflector::blacklist") | @options[:blacklist]
