@@ -62,11 +62,13 @@ module Rack
         :blacklist => [],
         :ignore_agents => [],
         :redis_connection_params => { :host => "127.0.0.1", :port => "6379" },
+        :update_block_lists_every => 60,
         :notifier_callback => nil,
         :fresh_start => false
       }.merge(options)
       
       @redis_storage = nil
+      @last_updated_block_lists_at = nil
       begin
         @redis_storage = Redis.new(@options[:redis_connection_params]) unless @options[:redis_connection_params].blank?
       rescue Timeout::Error
@@ -77,21 +79,36 @@ module Rack
         saved_keys = @redis_storage.keys "Deflector*"
         saved_keys.each { |key_name| @redis_storage.del key_name }
         log "Redis made a FRESH START!"
-      end      
+      end
+      
+      @whitelist = options[:whitelist]
+      @blacklist = options[:blacklist]
+      @ignore_agents = options[:ignore_agents]
     end
 
     def call env      
-      if options[:ignore_agents].any? {|word| env["HTTP_USER_AGENT"].to_s.downcase.include?(word) }
+      if @ignore_agents.any? {|word| env["HTTP_USER_AGENT"].to_s.downcase.include?(word) }
         log "Skipping user agent #{env["HTTP_USER_AGENT"]}"
         status, headers, body = @app.call env
         [status, headers, body]
       else
+        update_block_lists
         return deflect! if deflect? env
         status, headers, body = @app.call env
         [status, headers, body]
       end
     end
 
+    # Update white/blacklists from Redis. Note that this is only applicable when using the REDIS storage.
+    def update_block_lists
+      return unless @redis_storage
+      return if @last_updated_block_lists_at.present? && Time.now - @last_updated_block_lists_at < @options[:update_block_lists_every]
+      @whitelist = @redis_storage.get("Deflector::whitelist") | @options[:whitelist]
+      @blacklist = @redis_storage.get("Deflector::blacklist") | @options[:blacklist]
+      @ignore_agents = @redis_storage.get("Deflector::ignore_agents") | @options[:ignore_agents]
+      @last_updated_block_lists_at = Time.now
+    end
+    
     def deflect!
       [403, { 'Content-Type' => 'text/html', 'Content-Length' => '0' }, []]
     end
@@ -99,8 +116,8 @@ module Rack
     def deflect? env
       @env = env
       @remote_addr = env['REMOTE_ADDR']
-      return false if options[:whitelist].include? @remote_addr
-      return true  if options[:blacklist].include? @remote_addr
+      return false if @whitelist.include? @remote_addr
+      return true  if @blacklist.include? @remote_addr
       sync { watch }
     end
 
@@ -130,6 +147,13 @@ module Rack
       set_key("block_expires", block_until.to_s)
       notifier = options[:notifier_callback]
       blocked_uris = get_key("requested_uris")
+      
+      if @redis_storage.present?
+        # push the new blocked ip into the 'recently deflected' ip list in redis.
+        list_size = @redis_storage.lpush("Deflector::recently_deflected_ips", "#{@remote_addr}:#{block_until.to_s}")
+        @redis_storage.ltrim("Deflector::recently_deflected_ips", 0, 99) if list_size > 100
+      end
+      
       notifier.call(@remote_addr, Socket.gethostname, blocked_uris) unless notifier.nil?
     end
 
