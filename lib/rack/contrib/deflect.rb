@@ -157,7 +157,8 @@ module Rack
     def deflect? env
       @env = env
       @remote_addr = env['REMOTE_ADDR']
-      return false if @deflector_enabled == false
+      log("Deflector is disabled...") unless @deflector_enabled
+      return false unless @deflector_enabled
       return false if @whitelist.include? @remote_addr
       return true  if @blacklist.include? @remote_addr
       sync { watch }
