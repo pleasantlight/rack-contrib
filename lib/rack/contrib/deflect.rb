@@ -140,11 +140,11 @@ module Rack
         @block_duration = redis_block_duration.to_i
       end
       
-      @whitelist = @redis_storage.get("deflector::whitelist") || []
+      @whitelist = @redis_storage.lrange("deflector::whitelist", 0, -1) || []
       @whitelist |= @options[:whitelist]
-      @blacklist = @redis_storage.get("deflector::blacklist") || []
+      @blacklist = @redis_storage.lrange("deflector::blacklist", 0, -1) || []
       @blacklist |= @options[:blacklist]
-      @ignore_agents = @redis_storage.get("deflector::ignore_agents") || []
+      @ignore_agents = @redis_storage.lrange("deflector::ignore_agents", 0, -1) || []
       @ignore_agents |= @options[:ignore_agents]
       
       @last_updated_config_at = Time.now
@@ -159,7 +159,6 @@ module Rack
       @remote_addr = env['REMOTE_ADDR']
       log("Deflector is disabled...") unless @deflector_enabled
       return false unless @deflector_enabled
-      log("Deflector is enabled...")
       return false if @whitelist.include? @remote_addr
       return true  if @blacklist.include? @remote_addr
       sync { watch }
