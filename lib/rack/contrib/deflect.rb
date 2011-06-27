@@ -62,13 +62,12 @@ module Rack
         :blacklist => [],
         :ignore_agents => [],
         :redis_connection_params => { :host => "127.0.0.1", :port => "6379" },
-        :update_config_every => 60,
         :notifier_callback => nil,
         :fresh_start => false
       }.merge(options)
       
       @redis_storage = nil
-      @last_updated_config_at = nil
+      @last_config_version = 0
       begin
         @redis_storage = Redis.new(@options[:redis_connection_params]) unless @options[:redis_connection_params].blank?
       rescue Timeout::Error
@@ -108,14 +107,18 @@ module Rack
     # Update configuration from Redis. Note that this is only applicable when using the REDIS storage.
     def update_config_from_redis
       return unless @redis_storage
-      return if @last_updated_config_at.present? && Time.now - @last_updated_config_at < @options[:update_config_every]
+      
+      # Read the current version of the configuration from redis.
+      curr_config_version = @redis_storage.get("fiverr_config::rack_deflect::config_version").to_i
+      return if curr_config_version <= @last_config_version
+            
+      log "Updating configuration from REDIS. Current configuration version: #{@last_config_version}. Version from REDIS: #{curr_config_version}"
       
       redis_deflector_enabled = @redis_storage.get("fiverr_config::rack_deflect::enabled")
       if redis_deflector_enabled.present? && (redis_deflector_enabled.downcase == "false" || redis_deflector_enabled.downcase == "no" || redis_deflector_enabled == "0")
         log "*** REDIS says deflector is DISABLED - disabling..." if @deflector_enabled == true
         @deflector_enabled = false
       else
-        log "*** REDIS says deflector is ENABLED - enabling..." if @deflector_enabled == false
         @deflector_enabled = true
       end
       
@@ -147,7 +150,7 @@ module Rack
       @ignore_agents = @redis_storage.lrange("deflector::ignore_agents", 0, -1) || []
       @ignore_agents |= @options[:ignore_agents]
       
-      @last_updated_config_at = Time.now
+      @last_config_version = curr_config_version
     end
     
     def deflect!
